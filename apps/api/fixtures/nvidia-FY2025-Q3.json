@@ -1,0 +1,11 @@
+{
+  "summary_en":"NVIDIA delivered strong fiscal third-quarter results on data-center demand.","summary_zh":"NVIDIA 受資料中心需求帶動，繳出強勁第三季財報。",
+  "catalysts_en":["Blackwell demand"],"catalysts_zh":["Blackwell 需求"],"risks_en":["Product transition execution"],"risks_zh":["產品轉換執行風險"],
+  "sources":[{"id":"nvda-q3-release","url":"https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-third-quarter-fiscal-2025","publisher":"NVIDIA","document_type":"earnings_release","published_at":"2024-11-20T21:20:00Z","language":"en","content":"Third-quarter revenue was $35.1 billion. Data Center revenue was $30.8 billion. GAAP gross margin was 74.6%."}],
+  "facts":[
+    {"id":"revenue","category":"metrics","label_en":"Revenue","label_zh":"營收","value":"US$35.1 billion","period":"FY2025-Q3","source_id":"nvda-q3-release","locator":"paragraph:1","excerpt":"Third-quarter revenue was $35.1 billion"},
+    {"id":"dc-revenue","category":"metrics","label_en":"Data Center revenue","label_zh":"資料中心營收","value":"US$30.8 billion","period":"FY2025-Q3","source_id":"nvda-q3-release","locator":"paragraph:1","excerpt":"Data Center revenue was $30.8 billion"},
+    {"id":"gross-margin","category":"metrics","label_en":"GAAP gross margin","label_zh":"GAAP 毛利率","value":"74.6%","period":"FY2025-Q3","source_id":"nvda-q3-release","locator":"paragraph:1","excerpt":"GAAP gross margin was 74.6%"}
+  ],"comparisons":[]
+}
+

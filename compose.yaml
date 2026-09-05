@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: research
+      POSTGRES_USER: research
+      POSTGRES_PASSWORD: research
+    ports: ["5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: research
+      MINIO_ROOT_PASSWORD: research-secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio-data:/data]
+  api:
+    build: ./apps/api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://research:research@postgres:5432/research
+      OBJECT_STORE_PATH: /data/objects
+      OBJECT_STORE_BACKEND: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: research-documents
+      S3_ACCESS_KEY: research
+      S3_SECRET_KEY: research-secret
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-deterministic}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
+      WEB_ORIGIN: http://localhost:3000
+    ports: ["8000:8000"]
+    volumes: [object-data:/data/objects]
+    depends_on:
+      postgres: {condition: service_healthy}
+      minio: {condition: service_started}
+  web:
+    build: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on: [api]
+volumes:
+  postgres-data:
+  minio-data:
+  object-data:

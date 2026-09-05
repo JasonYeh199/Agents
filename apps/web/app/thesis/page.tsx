@@ -1,0 +1,26 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+type Run = {id:string;company:string;fiscal_period:string;output_language:string;status:string};
+type Evidence = {source_run_id:string;fact_id:string;value:string;citation:{source_id:string;locator:string;supporting_excerpt:string}};
+type Claim = {id:string;statement:string;dimension:string;status:string;confidence:number;evidence:Evidence[]};
+type Snapshot = {version:number;company:string;title:string;core_thesis:string;claims:Claim[];catalysts:string[];risks:string[];disconfirming_signals:string[];source_run_ids:string[];updated_at:string};
+type Thesis = {id:string;status:string;snapshot:Snapshot;versions:Snapshot[];events:{sequence:number;kind:string;message:string;timestamp:string;payload:Record<string,unknown>}[]};
+
+export default function ThesisPage(){
+  const [runs,setRuns]=useState<Run[]>([]),[theses,setTheses]=useState<Thesis[]>([]),[selected,setSelected]=useState(""),[sourceRun,setSourceRun]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  async function load(){const [r,t]=await Promise.all([fetch(`${API}/api/v1/research-runs`).then(x=>x.json()),fetch(`${API}/api/v1/theses`).then(x=>x.json())]);setRuns(r.filter((x:Run)=>x.status==="completed"));setTheses(t);if(!selected&&t[0])setSelected(t[0].id)}
+  useEffect(()=>{load()},[]);
+  const thesis=theses.find(t=>t.id===selected);
+  const eligible=useMemo(()=>runs.filter(r=>!thesis||r.company===thesis.snapshot.company),[runs,thesis]);
+  useEffect(()=>{if(eligible[0])setSourceRun(eligible[0].id)},[selected,runs.length]);
+  async function mutate(kind:"create"|"update"){if(!sourceRun)return;setBusy(true);setError("");const url=kind==="create"?`${API}/api/v1/theses`:`${API}/api/v1/theses/${selected}/updates`;const response=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({source_run_id:sourceRun})});if(!response.ok){const body=await response.json();setError(body.detail||"Update failed")}else{const item=await response.json();await load();setSelected(item.id)}setBusy(false)}
+  return <main className="thesis-app">
+    <header><div className="brand">SIGNAL<span>FORGE</span></div><div className="badge">POC 02 · LIVING INVESTMENT THESIS</div></header>
+    <section className="thesis-hero"><div><p className="eyebrow">STATEFUL RESEARCH MEMORY</p><h1>論點不是報告。<br/><em>它是一個持續更新的狀態。</em></h1></div><div className="thesis-control"><label>來源 Earnings Run<select value={sourceRun} onChange={e=>setSourceRun(e.target.value)}>{eligible.map(r=><option value={r.id} key={r.id}>{r.company.toUpperCase()} · {r.fiscal_period} · {r.output_language}</option>)}</select></label>{thesis?<button disabled={busy} onClick={()=>mutate("update")}>{busy?"更新中…":"套用新證據，建立下一版本 →"}</button>:<button disabled={busy} onClick={()=>mutate("create")}>{busy?"建立中…":"建立第一版 Thesis →"}</button>}{error&&<p className="error">{error}</p>}</div></section>
+    <section className="thesis-picker"><b>THESIS MEMORY</b><select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">建立新的 Thesis</option>{theses.map(t=><option value={t.id} key={t.id}>{t.snapshot.title} · v{t.snapshot.version}</option>)}</select></section>
+    {thesis?<section className="thesis-grid"><article><div className="thesis-title"><div><p className="eyebrow">VERSION {thesis.snapshot.version} · {thesis.status.toUpperCase()}</p><h2>{thesis.snapshot.title}</h2></div><div className="confidence">{Math.round(thesis.snapshot.claims.reduce((n,c)=>n+c.confidence,0)/thesis.snapshot.claims.length)}<small>AVG CONFIDENCE</small></div></div><p className="core">{thesis.snapshot.core_thesis}</p><h3>Evidence-backed claims</h3>{thesis.snapshot.claims.map(c=><div className="thesis-claim" key={c.id}><div><span className={`state ${c.status}`}>{c.status}</span><small>{c.dimension}</small></div><p>{c.statement}</p><b>{c.confidence}%</b><details><summary>{c.evidence.length} evidence item</summary>{c.evidence.map(e=><blockquote key={e.fact_id}><code>{e.citation.source_id}:{e.citation.locator}</code><p>{e.citation.supporting_excerpt}</p><small>Run {e.source_run_id}</small></blockquote>)}</details></div>)}<div className="signal-grid"><div><h3>Catalysts</h3>{thesis.snapshot.catalysts.map(x=><p key={x}>＋ {x}</p>)}</div><div><h3>Risks</h3>{thesis.snapshot.risks.map(x=><p key={x}>− {x}</p>)}</div></div><div className="disconfirm"><h3>Disconfirming signals</h3>{thesis.snapshot.disconfirming_signals.map(x=><p key={x}>⚠ {x}</p>)}</div></article><aside><div className="panel"><p className="eyebrow">VERSION HISTORY</p>{[...thesis.versions].reverse().map(v=><button className="version" key={v.version}><b>v{v.version}</b><span>{new Date(v.updated_at).toLocaleString()}</span><small>{v.source_run_ids.length} source runs</small></button>)}</div><div className="panel"><p className="eyebrow">MEMORY EVENTS</p>{[...thesis.events].reverse().map(e=><div className="event" key={e.sequence}><i/><div><b>{e.kind}</b><span>{new Date(e.timestamp).toLocaleString()}</span></div></div>)}</div></aside></section>:<section className="empty"><p className="eyebrow">NO THESIS YET</p><h2>選擇一筆完成的 Earnings Run，建立第一版投資論點。</h2></section>}
+  </main>
+}

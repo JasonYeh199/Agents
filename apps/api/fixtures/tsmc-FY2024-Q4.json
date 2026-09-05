@@ -1,0 +1,12 @@
+{
+  "summary_en":"TSMC ended 2024 with strong fourth-quarter growth led by advanced technologies.","summary_zh":"台積電在先進製程帶動下，以強勁成長完成 2024 年第四季。",
+  "catalysts_en":["AI-related demand","Advanced-node mix"],"catalysts_zh":["AI 相關需求","先進製程比重"],"risks_en":["Overseas fab dilution","Macroeconomic cyclicality"],"risks_zh":["海外廠稀釋","總體景氣循環"],
+  "sources":[{"id":"tsmc-q4-release","url":"https://investor.tsmc.com/english/quarterly-results/2024/q4","publisher":"TSMC","document_type":"quarterly_results","published_at":"2025-01-16T06:00:00Z","language":"en","content":"Fourth quarter revenue was NT$868.46 billion. Gross margin was 59.0%. Diluted earnings per share were NT$14.45. First quarter revenue is expected between US$25.0 billion and US$25.8 billion."}],
+  "facts":[
+    {"id":"revenue","category":"metrics","label_en":"Revenue","label_zh":"營收","value":"NT$868.46 billion","period":"FY2024-Q4","source_id":"tsmc-q4-release","locator":"paragraph:1","excerpt":"revenue was NT$868.46 billion"},
+    {"id":"gross-margin","category":"metrics","label_en":"Gross margin","label_zh":"毛利率","value":"59.0%","period":"FY2024-Q4","source_id":"tsmc-q4-release","locator":"paragraph:1","excerpt":"Gross margin was 59.0%"},
+    {"id":"eps","category":"metrics","label_en":"Diluted EPS","label_zh":"稀釋每股盈餘","value":"NT$14.45","period":"FY2024-Q4","source_id":"tsmc-q4-release","locator":"paragraph:1","excerpt":"Diluted earnings per share were NT$14.45"},
+    {"id":"guidance","category":"guidance","label_en":"Next-quarter revenue outlook","label_zh":"下季營收展望","value":"US$25.0–25.8 billion","period":"FY2025-Q1","source_id":"tsmc-q4-release","locator":"paragraph:1","excerpt":"expected between US$25.0 billion and US$25.8 billion"}
+  ],"comparisons":[]
+}
+

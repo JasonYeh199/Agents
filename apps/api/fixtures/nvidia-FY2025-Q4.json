@@ -1,0 +1,16 @@
+{
+  "summary_en": "NVIDIA closed fiscal 2025 with record quarterly revenue, led by accelerated computing demand.",
+  "summary_zh": "NVIDIA 以創紀錄的季度營收結束 2025 財年，主要由加速運算需求帶動。",
+  "catalysts_en": ["Blackwell production ramp", "Continued data-center demand"],
+  "catalysts_zh": ["Blackwell 量產爬坡", "資料中心需求延續"],
+  "risks_en": ["Supply constraints", "Export-control uncertainty"],
+  "risks_zh": ["供應限制", "出口管制不確定性"],
+  "sources": [{"id":"nvda-q4-release","url":"https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-fourth-quarter-and-fiscal-2025","publisher":"NVIDIA","document_type":"earnings_release","published_at":"2025-02-26T21:20:00Z","language":"en","content":"NVIDIA reported revenue for the fourth quarter ended January 26, 2025, of $39.3 billion. Data Center revenue was $35.6 billion. GAAP gross margin was 73.0%. Revenue for the first quarter of fiscal 2026 is expected to be $43.0 billion, plus or minus 2%."}],
+  "facts": [
+    {"id":"revenue","category":"metrics","label_en":"Revenue","label_zh":"營收","value":"US$39.3 billion","period":"FY2025-Q4","source_id":"nvda-q4-release","locator":"paragraph:1","excerpt":"revenue ... was $39.3 billion"},
+    {"id":"dc-revenue","category":"metrics","label_en":"Data Center revenue","label_zh":"資料中心營收","value":"US$35.6 billion","period":"FY2025-Q4","source_id":"nvda-q4-release","locator":"paragraph:1","excerpt":"Data Center revenue was $35.6 billion"},
+    {"id":"gross-margin","category":"metrics","label_en":"GAAP gross margin","label_zh":"GAAP 毛利率","value":"73.0%","period":"FY2025-Q4","source_id":"nvda-q4-release","locator":"paragraph:1","excerpt":"GAAP gross margin was 73.0%"},
+    {"id":"guidance","category":"guidance","label_en":"Next-quarter revenue outlook","label_zh":"下季營收展望","value":"US$43.0 billion ±2%","period":"FY2026-Q1","source_id":"nvda-q4-release","locator":"paragraph:1","excerpt":"expected to be $43.0 billion, plus or minus 2%"}
+  ], "comparisons": []
+}
+

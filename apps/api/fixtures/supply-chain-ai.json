@@ -1,0 +1,35 @@
+{
+  "sources": [
+    {"id":"nvidia-demand","url":"https://investor.nvidia.com/financial-info/quarterly-results/default.aspx","publisher":"NVIDIA Investor Relations","document_type":"earnings release","published_at":"2025-02-26T00:00:00Z","language":"en","content":"NVIDIA reported continued strong demand for accelerated computing infrastructure and data center systems."},
+    {"id":"tsmc-packaging","url":"https://investor.tsmc.com/english/quarterly-results/2024/q4","publisher":"TSMC Investor Relations","document_type":"earnings transcript","published_at":"2025-01-16T00:00:00Z","language":"en","content":"TSMC said advanced packaging capacity remained tight and it planned to continue expanding CoWoS capacity."},
+    {"id":"tsmc-capex","url":"https://investor.tsmc.com/english/quarterly-results/2025/q1","publisher":"TSMC Investor Relations","document_type":"earnings presentation","published_at":"2025-04-17T00:00:00Z","language":"en","content":"TSMC reiterated investment to support advanced process and advanced packaging demand."},
+    {"id":"hynix-hbm","url":"https://news.skhynix.com/sk-hynix-announces-2024-financial-results/","publisher":"SK hynix Newsroom","document_type":"official results","published_at":"2025-01-23T00:00:00Z","language":"en","content":"SK hynix described HBM as a key AI memory product and outlined continued capacity investment."},
+    {"id":"vertiv-demand","url":"https://investor.vertiv.com/news-releases/news-release-details/2025/Vertiv-Reports-Fourth-Quarter-and-Full-Year-2024-Results/default.aspx","publisher":"Vertiv Investor Relations","document_type":"earnings release","published_at":"2025-02-12T00:00:00Z","language":"en","content":"Vertiv reported data center demand and growth in thermal management and power infrastructure."},
+    {"id":"vertiv-capacity","url":"https://www.vertiv.com/en-us/about/news-and-insights/articles/press-releases/vertiv-expands-capacity/","publisher":"Vertiv","document_type":"capacity announcement","published_at":"2024-11-01T00:00:00Z","language":"en","content":"Vertiv announced manufacturing capacity expansion for data center power and cooling infrastructure."}
+  ],
+  "nodes": [
+    {"id":"ai-accelerators","type":"product","name":"AI accelerators","aliases":["AI GPU"]},
+    {"id":"nvidia","type":"company","name":"NVIDIA","ticker":"NVDA","aliases":[]},
+    {"id":"cowos","type":"technology","name":"CoWoS advanced packaging","aliases":["CoWoS"]},
+    {"id":"tsmc","type":"company","name":"TSMC","ticker":"2330.TW","aliases":["Taiwan Semiconductor"]},
+    {"id":"hbm","type":"product","name":"High Bandwidth Memory","aliases":["HBM"]},
+    {"id":"sk-hynix","type":"company","name":"SK hynix","ticker":"000660.KS","aliases":[]},
+    {"id":"data-center-power-cooling","type":"product","name":"Data center power and cooling","aliases":[]},
+    {"id":"vertiv","type":"company","name":"Vertiv","ticker":"VRT","aliases":[]}
+  ],
+  "edges": [
+    {"id":"e1","source_entity_id":"nvidia","target_entity_id":"ai-accelerators","type":"manufactures","confidence":99,"inference_level":"direct","source_ids":["nvidia-demand"]},
+    {"id":"e2","source_entity_id":"ai-accelerators","target_entity_id":"cowos","type":"depends_on","confidence":92,"inference_level":"direct","source_ids":["nvidia-demand","tsmc-packaging"]},
+    {"id":"e3","source_entity_id":"tsmc","target_entity_id":"cowos","type":"packages","confidence":99,"inference_level":"direct","source_ids":["tsmc-packaging"]},
+    {"id":"e4","source_entity_id":"tsmc","target_entity_id":"cowos","type":"expands","confidence":96,"inference_level":"direct","source_ids":["tsmc-packaging","tsmc-capex"]},
+    {"id":"e5","source_entity_id":"sk-hynix","target_entity_id":"hbm","type":"supplies","confidence":98,"inference_level":"direct","source_ids":["hynix-hbm"]},
+    {"id":"e6","source_entity_id":"ai-accelerators","target_entity_id":"hbm","type":"depends_on","confidence":90,"inference_level":"derived","source_ids":["nvidia-demand","hynix-hbm"]},
+    {"id":"e7","source_entity_id":"ai-accelerators","target_entity_id":"data-center-power-cooling","type":"depends_on","confidence":86,"inference_level":"derived","source_ids":["nvidia-demand","vertiv-demand"]},
+    {"id":"e8","source_entity_id":"vertiv","target_entity_id":"data-center-power-cooling","type":"supplies","confidence":97,"inference_level":"direct","source_ids":["vertiv-demand","vertiv-capacity"]},
+    {"id":"e9","source_entity_id":"tsmc","target_entity_id":"ai-accelerators","type":"benefits_from","confidence":91,"inference_level":"derived","source_ids":["nvidia-demand","tsmc-packaging","tsmc-capex"]},
+    {"id":"e10","source_entity_id":"vertiv","target_entity_id":"ai-accelerators","type":"benefits_from","confidence":84,"inference_level":"derived","source_ids":["nvidia-demand","vertiv-demand","vertiv-capacity"]}
+  ],
+  "conflicts": [
+    {"id":"c1","relationship_ids":["e2","e4"],"description":"Demand remains strong while packaging expansion timing may change the duration of the bottleneck.","status":"open"}
+  ]
+}
