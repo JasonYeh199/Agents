@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000");
 type Run = {id:string;company:string;fiscal_period:string;output_language:string;status:string};
 type Evidence = {source_run_id:string;fact_id:string;value:string;citation:{source_id:string;locator:string;supporting_excerpt:string}};
 type Claim = {id:string;statement:string;dimension:string;status:string;confidence:number;evidence:Evidence[]};

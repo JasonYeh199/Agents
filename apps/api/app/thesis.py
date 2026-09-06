@@ -4,8 +4,24 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from .db import InvestmentThesisRow, ResearchRunRow, SessionLocal
+from .profiles import published_profile
 from .providers import get_provider
 from .schemas import Citation, EarningsReport, ThesisClaim, ThesisEvidence, ThesisSnapshot
+
+CREATE_PROMPT = (
+    "Build an evidence-bound investment thesis. Preserve all evidence values and "
+    "citations exactly. Every claim must have supplied evidence."
+)
+UPDATE_PROMPT = (
+    "Update the prior investment thesis using only the new cited evidence. Mark "
+    "claims strengthened, unchanged, weakened, invalidated, or new. Preserve "
+    "citations and values exactly."
+)
+
+
+def _profile_instructions(profile_prompt: str, task_prompt: str) -> str:
+    """Apply the immutable published prompt while retaining harness invariants."""
+    return f"{profile_prompt.strip()}\n\n{task_prompt}"
 
 
 def _snapshot(report: EarningsReport, run_id: str, version: int, previous=None) -> ThesisSnapshot:
@@ -43,8 +59,8 @@ def _snapshot(report: EarningsReport, run_id: str, version: int, previous=None) 
             )
     company_name = (
         "\u53f0\u7a4d\u96fb"
-        if report.company.value == "tsmc" and zh
-        else report.company.value.upper()
+        if report.company == "2330.TW" and zh
+        else report.company.upper()
     )
     title_suffix = "\u6295\u8cc7\u8ad6\u9ede" if zh else "Investment Thesis"
     signals = (
@@ -102,11 +118,12 @@ async def create_thesis_from_run(source_run_id: UUID, title: str | None = None) 
         if not run or run.status != "completed" or not run.report_json:
             raise ValueError("source earnings run must be completed")
         report = EarningsReport.model_validate_json(run.report_json)
+        profile = await published_profile(session, "thesis")
         snapshot = _snapshot(report, run.id, 1)
         draft = snapshot.model_copy(deep=True)
-        if provider := get_provider():
+        if provider := get_provider(run_config=profile.config):
             generated, _ = await provider.generate_structured(
-                "Build an evidence-bound investment thesis. Preserve all evidence values and citations exactly. Every claim must have supplied evidence.",
+                _profile_instructions(profile.config["prompt"], CREATE_PROMPT),
                 {"draft": snapshot.model_dump(mode="json")},
                 ThesisSnapshot,
             )
@@ -120,7 +137,7 @@ async def create_thesis_from_run(source_run_id: UUID, title: str | None = None) 
             "step": "synthesize",
             "message": "Initial thesis created",
             "timestamp": stamp.isoformat(),
-            "payload": {"source_run_id": run.id, "version": 1},
+            "payload": {"source_run_id": run.id, "version": 1, "profile_version_id": profile.id},
         }
         row = InvestmentThesisRow(
             id=str(thesis_id),
@@ -153,13 +170,14 @@ async def update_thesis_from_run(thesis_id: UUID, source_run_id: UUID) -> None:
             raise ValueError("source run was already applied")
         previous = ThesisSnapshot.model_validate(row.thesis)
         report = EarningsReport.model_validate_json(run.report_json)
+        profile = await published_profile(session, "thesis")
         snapshot = _snapshot(report, run.id, row.version + 1, previous)
         snapshot.source_run_ids = [*row.source_run_ids, run.id]
         draft = snapshot.model_copy(deep=True)
         allowed = _evidence_keys(previous) | _evidence_keys(draft)
-        if provider := get_provider():
+        if provider := get_provider(run_config=profile.config):
             generated, _ = await provider.generate_structured(
-                "Update the prior investment thesis using only the new cited evidence. Mark claims strengthened, unchanged, weakened, invalidated, or new. Preserve citations and values exactly.",
+                _profile_instructions(profile.config["prompt"], UPDATE_PROMPT),
                 {
                     "previous": previous.model_dump(mode="json"),
                     "new_evidence_report": report.model_dump(mode="json"),
@@ -177,7 +195,7 @@ async def update_thesis_from_run(thesis_id: UUID, source_run_id: UUID) -> None:
                 "step": "update",
                 "message": "Thesis updated from new earnings evidence",
                 "timestamp": datetime.now(UTC).isoformat(),
-                "payload": {"source_run_id": run.id, "version": snapshot.version},
+                "payload": {"source_run_id": run.id, "version": snapshot.version, "profile_version_id": profile.id},
             }
         )
         source_ids.append(run.id)

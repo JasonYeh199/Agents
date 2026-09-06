@@ -9,6 +9,7 @@ from app.schemas import ThesisSnapshot
 from app.thesis import (
     _enforce_authoritative_state,
     _evidence_keys,
+    _profile_instructions,
     create_thesis_from_run,
     update_thesis_from_run,
 )
@@ -95,3 +96,9 @@ def test_model_cannot_overwrite_authoritative_thesis_memory():
     secured = _enforce_authoritative_state(generated, draft, _evidence_keys(draft))
     assert secured.version == 2
     assert secured.source_run_ids == ["run-0", "run-1"]
+
+
+def test_thesis_instructions_include_published_profile_prompt_and_invariants():
+    instructions = _profile_instructions("Prefer concise prose.", "Preserve citations exactly.")
+    assert instructions.startswith("Prefer concise prose.")
+    assert instructions.endswith("Preserve citations exactly.")

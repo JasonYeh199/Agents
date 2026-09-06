@@ -18,6 +18,7 @@ class ProviderUsage:
     output_tokens: int = 0
     duration_ms: int = 0
     response_id: str | None = None
+    reasoning_summaries: list[str] | None = None
 
 
 @dataclass
@@ -33,7 +34,7 @@ class ModelProvider(ABC):
 
     @abstractmethod
     async def generate_structured(
-        self, instructions: str, payload: dict[str, Any], schema: type[T]
+        self, instructions: str, payload: dict[str, Any], schema: type[T], emit: Callable[[str], Any | Awaitable[Any]] | None = None
     ) -> tuple[T, ProviderUsage]: ...
 
     @abstractmethod
@@ -57,22 +58,52 @@ class OpenAIProvider(ModelProvider):
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
         self.settings = settings
 
-    async def generate_structured(self, instructions, payload, schema):
+    async def generate_structured(self, instructions, payload, schema, emit=None):
         started = time.perf_counter()
-        response = await self.client.responses.parse(
-            model=self.settings.openai_model,
-            instructions=instructions,
-            input=json.dumps(payload, ensure_ascii=False),
-            text_format=schema,
-            reasoning={"effort": self.settings.reasoning_effort},
-            max_output_tokens=self.settings.max_output_tokens,
-        )
+        import inspect
+
+        summaries: list[str] = []
+        reasoning = {"effort": self.settings.reasoning_effort}
+        summary_mode = getattr(self.settings, "reasoning_summary", "auto")
+        if summary_mode != "none":
+            reasoning["summary"] = summary_mode
+
+        async def invoke(reasoning_config):
+            async with self.client.responses.stream(
+                model=self.settings.openai_model,
+                instructions=instructions,
+                input=json.dumps(payload, ensure_ascii=False),
+                text_format=schema,
+                reasoning=reasoning_config,
+                max_output_tokens=self.settings.max_output_tokens,
+            ) as stream:
+                async for event in stream:
+                    if event.type == "response.reasoning_summary_text.delta":
+                        delta = getattr(event, "delta", "")
+                        if delta:
+                            summaries.append(delta)
+                            if emit:
+                                result = emit(delta)
+                                if inspect.isawaitable(result):
+                                    await result
+                return await stream.get_final_response()
+
+        try:
+            response = await invoke(reasoning)
+        except Exception as exc:
+            # Some otherwise-compatible models reject the optional summary field.
+            # Retry once without it, while preserving the requested reasoning effort.
+            if "summary" not in reasoning or type(exc).__name__ != "BadRequestError":
+                raise
+            summaries.clear()
+            response = await invoke({"effort": self.settings.reasoning_effort})
         usage = response.usage
         return response.output_parsed, ProviderUsage(
             input_tokens=getattr(usage, "input_tokens", 0),
             output_tokens=getattr(usage, "output_tokens", 0),
             duration_ms=int((time.perf_counter() - started) * 1000),
             response_id=response.id,
+            reasoning_summaries=["".join(summaries)] if summaries else [],
         )
 
     async def run_tools(self, instructions, payload, tools, max_calls):
@@ -132,6 +163,16 @@ class OpenAIProvider(ModelProvider):
         raise RuntimeError("provider tool loop ended without a final response")
 
 
-def get_provider(settings: Settings | None = None) -> ModelProvider | None:
+def get_provider(settings: Settings | None = None, run_config: dict[str, Any] | None = None) -> ModelProvider | None:
     settings = settings or get_settings()
-    return OpenAIProvider(settings) if settings.model_provider == "openai" else None
+    run_config = run_config or {}
+    budgets = run_config.get("budgets", {})
+    provider = run_config.get("provider", settings.model_provider)
+    settings = settings.model_copy(update={
+        "model_provider": provider,
+        "openai_model": run_config.get("model") or settings.openai_model,
+        "reasoning_effort": run_config.get("reasoning_effort", settings.reasoning_effort),
+        "max_output_tokens": budgets.get("max_output_tokens", run_config.get("max_output_tokens", settings.max_output_tokens)),
+        "reasoning_summary": run_config.get("reasoning_summary", "auto"),
+    })
+    return OpenAIProvider(settings) if settings.model_provider == "openai" and settings.openai_api_key else None

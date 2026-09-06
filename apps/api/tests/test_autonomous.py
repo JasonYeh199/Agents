@@ -46,3 +46,4 @@ def test_autonomous_project_budget_guard():
         project = client.get(f"/api/v1/autonomous-projects/{created['id']}").json()
         assert project["status"] == "awaiting_retry"
         assert "budget exceeded" in project["error"]
+        assert project["budget"]["max_tool_calls"] == 5

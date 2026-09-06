@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: signalforge-agents-api
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: apps/api
+    buildCommand: pip install .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: signalforge-agents-db
+          property: connectionString
+      - key: OBJECT_STORE_BACKEND
+        value: filesystem
+      - key: OBJECT_STORE_PATH
+        value: /tmp/signalforge/objects
+      - key: MODEL_PROVIDER
+        value: openai
+      - key: OPENAI_MODEL
+        value: gpt-5.5
+      - key: WEB_ORIGIN
+        value: https://agents-taupe-three.vercel.app
+      - key: ADMIN_COOKIE_SECURE
+        value: "true"
+      - key: UNIVERSE_AUTO_SYNC
+        value: "true"
+      - key: UNIVERSE_SYNC_HOUR_UTC
+        value: "18"
+      - key: FIXTURE_MODE
+        value: "false"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: ADMIN_SESSION_SECRET
+        sync: false
+      - key: SEC_USER_AGENT
+        sync: false
+
+databases:
+  - name: signalforge-agents-db
+    plan: free
+    region: singapore
+    databaseName: signalforge
+    user: signalforge
+    postgresMajorVersion: "18"

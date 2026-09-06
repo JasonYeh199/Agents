@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from .db import AutonomousProjectRow, ResearchRunRow, SessionLocal
 from .harness import execute_run
+from .profiles import ordered_components, resolved_run_config
 from .schemas import (
     AutonomousReport,
     Citation,
@@ -32,8 +33,9 @@ def now():
     return datetime.now(UTC)
 
 
-def make_plan():
-    return [ProjectTask(id=f"task-{name}", capability=name, objective=objective, depends_on=[f"task-{item}" for item in dependencies]).model_dump(mode="json") for name, objective, dependencies in CAPABILITIES]
+def make_plan(config=None):
+    enabled = {item["id"] for item in (config or {}).get("pipeline", []) if item.get("enabled", True)}
+    return [ProjectTask(id=f"task-{name}", capability=name, objective=objective, depends_on=[f"task-{item}" for item in dependencies], status="pending" if not enabled or name in enabled else "skipped").model_dump(mode="json") for name, objective, dependencies in CAPABILITIES]
 
 
 def add_event(row, kind, step, message, **payload):
@@ -50,7 +52,12 @@ async def ensure_earnings_run(row, session):
     if run:
         return run
     stamp = now()
-    run = ResearchRunRow(id=str(uuid4()), company=row.company, fiscal_period=period, output_language=row.language, config_json=json.dumps({"live_sources": False}), created_at=stamp, updated_at=stamp)
+    config, _ = await resolved_run_config(session, "earnings")
+    parent = json.loads(row.config_json or "{}")
+    for key in ("ticker", "company_name", "market", "universe_version_id", "universe", "universe_as_of", "universe_source_url", "universe_content_hash"):
+        if key in parent:
+            config[key] = parent[key]
+    run = ResearchRunRow(id=str(uuid4()), company=row.company, fiscal_period=period, output_language=row.language, config_json=json.dumps(config, ensure_ascii=False), created_at=stamp, updated_at=stamp)
     session.add(run)
     await session.commit()
     await execute_run(run.id)
@@ -67,8 +74,11 @@ async def execute_project(project_id: UUID | str):
         add_event(row, "project.started", "planner", "Autonomous research project started")
         await session.commit()
         try:
-            for index, spec in enumerate(CAPABILITIES):
-                capability = spec[0]
+            config = json.loads(row.config_json or "{}")
+            ordered = ordered_components(config, [spec[0] for spec in CAPABILITIES])
+            if len(ordered) > int(config.get("max_steps", 10)):
+                raise RuntimeError("project step budget exceeded")
+            for index, capability in enumerate(ordered):
                 await session.refresh(row)
                 state = row.state
                 if row.cancel_requested:
@@ -83,20 +93,28 @@ async def execute_project(project_id: UUID | str):
                     return
                 if capability in state.get("completed_steps", []):
                     continue
-                task = row.project_plan[index]
+                task = next(item for item in row.project_plan if item["capability"] == capability)
                 task["status"] = "running"
                 row.project_plan = [task if item["id"] == task["id"] else item for item in row.project_plan]
-                row.current_step, row.progress = capability, int(index / len(CAPABILITIES) * 100)
+                row.current_step, row.progress = capability, int(index / len(ordered) * 100)
                 add_event(row, "capability.started", capability, f"{capability} capability started")
+                add_event(row, "tool.started", capability, f"Running {capability} capability", tool=capability, arguments={"project_id": row.id})
                 await session.commit()
                 await execute_capability(row, session, capability, state)
+                add_event(row, "tool.completed", capability, f"{capability} capability completed", tool=capability, result_summary=f"Completed bounded {capability} analysis")
+                decision = f"{capability} completed using the immutable project configuration and evidence available at this checkpoint."
+                state.setdefault("reasoning_summaries", []).append(decision)
+                add_event(row, "decision.summary", capability, decision)
                 state.setdefault("completed_steps", []).append(capability)
-                checkpoint = hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()[:16]
-                state.setdefault("checkpoints", []).append(checkpoint)
+                checkpoint = None
+                if config.get("checkpoint_each_step", True):
+                    checkpoint = hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()[:16]
+                    state.setdefault("checkpoints", []).append(checkpoint)
                 task["status"], task["checkpoint"] = "completed", checkpoint
                 row.project_plan = [task if item["id"] == task["id"] else item for item in row.project_plan]
                 row.state = state
-                add_event(row, "checkpoint.saved", capability, "Durable checkpoint saved", checkpoint=checkpoint)
+                if checkpoint:
+                    add_event(row, "checkpoint.saved", capability, "Durable checkpoint saved", checkpoint=checkpoint)
                 await session.commit()
             row.status, row.progress, row.current_step = "completed", 100, None
             state["duration_ms"] = state.get("duration_ms", 0) + int((time.perf_counter() - started) * 1000)
@@ -112,8 +130,9 @@ async def execute_project(project_id: UUID | str):
 
 async def execute_capability(row, session, capability, state):
     config = json.loads(row.config_json)
+    budgets = config.get("budgets", {})
     next_calls = state.get("tool_calls", 0) + 1
-    if next_calls > config.get("max_tool_calls", 40):
+    if next_calls > budgets.get("max_tool_calls", 40):
         raise RuntimeError("project tool-call budget exceeded")
     state["tool_calls"] = next_calls
     if capability == "earnings":
@@ -122,6 +141,14 @@ async def execute_capability(row, session, capability, state):
             raise RuntimeError("earnings capability failed")
         state["source_run_id"] = run.id
         state["earnings_report"] = json.loads(run.report_json)
+        run_state = run.state
+        state["input_tokens"] = state.get("input_tokens", 0) + run_state.get("input_tokens", 0)
+        state["output_tokens"] = state.get("output_tokens", 0) + run_state.get("output_tokens", 0)
+        state["estimated_cost_usd"] = round(
+            state.get("estimated_cost_usd", 0) + run_state.get("estimated_cost_usd", 0), 6
+        )
+        if state["estimated_cost_usd"] > float(budgets.get("max_cost_usd", 5)):
+            raise RuntimeError("project cost budget exceeded")
     elif capability == "thesis":
         report = EarningsReport.model_validate(state["earnings_report"])
         state["thesis"] = {"core": report.executive_summary, "catalysts": report.catalysts, "risks": report.risks}

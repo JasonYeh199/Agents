@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect, useMemo, useState} from "react";
-const API=process.env.NEXT_PUBLIC_API_URL||"http://localhost:8000";
+const API=process.env.NEXT_PUBLIC_API_URL||(process.env.NODE_ENV==="production"?"":"http://localhost:8000");
 type Task={id:string;agent_role:string;objective:string;status:string};
 type Investigation={id:string;subject:string;status:string;current_step:string|null;progress:number;tasks:Task[];error:string|null};
 type Evidence={citation:{source_id:string;locator:string;supporting_excerpt:string};source_date:string;primary_source:boolean};

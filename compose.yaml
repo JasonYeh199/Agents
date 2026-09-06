@@ -34,6 +34,13 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
       WEB_ORIGIN: http://localhost:3000
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-}
+      ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-true}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-}
+      UNIVERSE_AUTO_SYNC: ${UNIVERSE_AUTO_SYNC:-true}
+      UNIVERSE_SYNC_HOUR_UTC: ${UNIVERSE_SYNC_HOUR_UTC:-18}
+      FIXTURE_MODE: ${FIXTURE_MODE:-false}
     ports: ["8000:8000"]
     volumes: [object-data:/data/objects]
     depends_on:

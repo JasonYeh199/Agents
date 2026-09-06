@@ -6,14 +6,15 @@ import typer
 
 from .db import SessionLocal, get_run, init_db
 from .harness import execute_run
-from .schemas import Company, Language
+from .schemas import Language
+from .universe import normalize_ticker
 
 cli = typer.Typer()
 
 
 @cli.command()
 def demo(
-    company: Company = Company.NVIDIA,
+    company: str = "NVDA",
     period: str = "FY2025-Q4",
     language: Language = Language.ZH_TW,
 ):
@@ -30,7 +31,7 @@ def demo(
             s.add(
                 ResearchRunRow(
                     id=rid,
-                    company=company.value,
+                    company=normalize_ticker(company),
                     fiscal_period=period,
                     output_language=language.value,
                     created_at=stamp,

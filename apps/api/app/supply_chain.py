@@ -7,6 +7,8 @@ from uuid import UUID
 
 from .config import get_settings
 from .db import SessionLocal, SupplyChainInvestigationRow
+from .profiles import ordered_components
+from .providers import get_provider
 from .schemas import (
     AgentExecution,
     BeneficiaryCandidate,
@@ -25,7 +27,6 @@ from .schemas import (
 )
 from .storage import ObjectStore
 
-STEPS = ["normalize", "plan", "collect", "resolve", "graph", "critic", "beneficiaries", "citations", "evaluate"]
 AGENT_TASKS = [
     ("capacity", "Find capacity, expansion, utilization and lead-time evidence", [], 5),
     ("supplier", "Find supplier, customer, product and manufacturing relationships", [], 7),
@@ -35,6 +36,8 @@ AGENT_TASKS = [
     ("critic", "Identify contradictions, stale evidence and inference gaps", ["graph_synthesizer"], 3),
     ("beneficiary", "Derive evidence-bound beneficiary candidates", ["critic"], 3),
 ]
+AGENT_ROLES = [item[0] for item in AGENT_TASKS]
+PIPELINE_COMPONENTS = ["plan", *AGENT_ROLES]
 
 
 def now():
@@ -53,8 +56,33 @@ def load_fixture():
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def make_tasks():
-    return [InvestigationTask(id=f"task-{role}", agent_role=role, objective=objective, depends_on=[f"task-{x}" for x in dependencies], tool_budget=budget).model_dump(mode="json") for role, objective, dependencies, budget in AGENT_TASKS]
+def make_tasks(config: dict | None = None):
+    specs = {role: (objective, dependencies, budget) for role, objective, dependencies, budget in AGENT_TASKS}
+    if not config:
+        ordered = AGENT_ROLES
+        configured_dependencies = {role: dependencies for role, _, dependencies, _ in AGENT_TASKS}
+    else:
+        ordered = [component for component in ordered_components(config, PIPELINE_COMPONENTS) if component != "plan"]
+        configured_dependencies = {
+            node["id"]: node.get("depends_on", [])
+            for node in config.get("pipeline", [])
+            if isinstance(node, dict)
+        }
+    enabled = set(ordered)
+    return [
+        InvestigationTask(
+            id=f"task-{role}",
+            agent_role=role,
+            objective=specs[role][0],
+            depends_on=[
+                f"task-{dependency}"
+                for dependency in configured_dependencies.get(role, specs[role][1])
+                if dependency in enabled
+            ],
+            tool_budget=specs[role][2],
+        ).model_dump(mode="json")
+        for role in ordered
+    ]
 
 
 async def _agent(row, state, role, action):
@@ -67,7 +95,7 @@ async def _agent(row, state, role, action):
     task["status"] = "completed"
     elapsed = max(1, int((time.perf_counter() - started) * 1000))
     execution = AgentExecution(task_id=task["id"], agent_role=role, status="completed", tool_calls=min(task["tool_budget"], result if isinstance(result, int) else 1), duration_ms=elapsed)
-    configured_limit = json.loads(row.config_json).get("max_tool_calls", 30)
+    configured_limit = json.loads(row.config_json).get("budgets", {}).get("max_tool_calls", 30)
     projected_calls = state.get("tool_calls", 0) + execution.tool_calls
     if projected_calls > configured_limit:
         task["status"] = "failed"
@@ -88,7 +116,15 @@ async def execute_investigation(investigation_id: UUID | str):
         row.status = "running"
         await session.commit()
         try:
-            for index, step in enumerate(STEPS):
+            config = json.loads(row.config_json or "{}")
+            budgets = config.get("budgets", {})
+            components = ordered_components(config, PIPELINE_COMPONENTS)
+            steps = ["normalize", *components]
+            if config.get("citation_audit", True):
+                steps.append("citations")
+            if config.get("evaluation", True):
+                steps.append("evaluate")
+            for index, step in enumerate(steps):
                 await session.refresh(row)
                 if row.cancel_requested:
                     row.status, row.current_step = "cancelled", None
@@ -97,20 +133,30 @@ async def execute_investigation(investigation_id: UUID | str):
                     return
                 if step in completed:
                     continue
-                row.current_step, row.progress = step, int(index / len(STEPS) * 100)
+                row.current_step, row.progress = step, int(index / len(steps) * 100)
                 add_event(row, "step.started", step, f"Starting {step}")
                 await session.commit()
-                for attempt in range(get_settings().max_step_retries + 1):
+                max_retries = int(budgets.get("max_retries", get_settings().max_step_retries))
+                timeout = float(budgets.get("timeout_seconds", get_settings().step_timeout_seconds))
+                for attempt in range(max_retries + 1):
                     try:
-                        await asyncio.wait_for(run_step(row, step, state), timeout=get_settings().step_timeout_seconds)
+                        await asyncio.wait_for(run_step(row, step, state, session), timeout=timeout)
                         break
                     except Exception as exc:
                         add_event(row, "step.retry", step, f"Attempt {attempt + 1} failed", error_type=type(exc).__name__)
-                        if attempt == get_settings().max_step_retries:
+                        if attempt == max_retries:
                             raise
                 state.setdefault("completed_steps", []).append(step)
+                decision = f"{step} completed within the configured evidence and budget constraints."
+                state.setdefault("reasoning_summaries", []).append(decision)
+                add_event(row, "decision.summary", step, decision)
+                checkpoint = __import__("hashlib").sha256(
+                    json.dumps({key: value for key, value in state.items() if key != "checkpoints"}, sort_keys=True).encode()
+                ).hexdigest()[:16]
+                state.setdefault("checkpoints", []).append(checkpoint)
                 row.state = state
                 add_event(row, "step.completed", step, f"Completed {step}")
+                add_event(row, "checkpoint.saved", step, "Durable investigation checkpoint saved", checkpoint=checkpoint)
                 await session.commit()
             row.status, row.progress, row.current_step = "completed", 100, None
             state["duration_ms"] = state.get("duration_ms", 0) + int((time.perf_counter() - started) * 1000)
@@ -122,37 +168,23 @@ async def execute_investigation(investigation_id: UUID | str):
         await session.commit()
 
 
-async def run_step(row, step, state):
-    fixture = state.get("fixture")
+async def run_step(row, step, state, session=None):
+    config = json.loads(row.config_json or "{}")
     if step == "normalize":
         state["canonical_input"] = {"signal_type": row.signal_type, "subject": row.subject.strip(), "time_window": row.time_window, "question": row.question, "timezone": "Asia/Taipei"}
         state["fixture"] = load_fixture()
+        state["tasks"] = make_tasks(config)
     elif step == "plan":
-        state["tasks"] = make_tasks()
         state["tool_calls"] = state.get("tool_calls", 0) + 1
         add_event(row, "plan.created", step, "Investigation Planner created a bounded dependency graph", tasks=len(state["tasks"]))
-    elif step == "collect":
-        fixture = state["fixture"]
-        store = ObjectStore()
-        sources = []
-        for source in fixture["sources"]:
-            content = source["content"].encode()
-            key, digest = store.put(f"{row.id}/supply-chain/{source['id']}.txt", content)
-            sources.append(SourceDocument(id=source["id"], url=source["url"], publisher=source["publisher"], document_type=source["document_type"], published_at=source["published_at"], fetched_at=now(), sha256=digest, object_key=key, parser_version="1.0.0", language=source["language"]).model_dump(mode="json"))
-        state["sources"] = sources
-        await asyncio.gather(
-            _agent(row, state, "capacity", lambda: 2),
-            _agent(row, state, "supplier", lambda: 3),
-            _agent(row, state, "demand", lambda: 2),
-        )
-        projected_calls = state["tool_calls"] + len(sources)
-        if projected_calls > json.loads(row.config_json).get("max_tool_calls", 30):
-            raise RuntimeError("investigation tool-call budget exceeded")
-        state["tool_calls"] = projected_calls
-    elif step == "resolve":
+    elif step in {"capacity", "supplier", "demand"}:
+        _ensure_sources(row, state)
+        result_counts = {"capacity": 2, "supplier": 3, "demand": 2}
+        await _agent(row, state, step, lambda: result_counts[step])
+    elif step == "entity_resolver":
         await _agent(row, state, "entity_resolver", lambda: len(state["fixture"]["nodes"]))
         state["nodes"] = [SupplyChainEntity.model_validate(item).model_dump(mode="json") for item in state["fixture"]["nodes"]]
-    elif step == "graph":
+    elif step == "graph_synthesizer":
         def build_graph():
             source_map = {item["id"]: item for item in state["fixture"]["sources"]}
             edges = []
@@ -168,8 +200,10 @@ async def run_step(row, step, state):
         await _agent(row, state, "critic", lambda: len(graph.conflicts))
         for conflict in graph.conflicts:
             add_event(row, "graph.conflict", step, conflict.description, conflict_id=conflict.id)
-    elif step == "beneficiaries":
+    elif step == "beneficiary":
+        _ensure_sources(row, state)
         await _agent(row, state, "beneficiary", lambda: compose_report(row, state))
+        await enhance_report(row, state, session)
     elif step == "citations":
         graph = EvidenceGraph.model_validate_json(row.graph_json)
         known_sources = {item["id"] for item in state["sources"]}
@@ -183,6 +217,118 @@ async def run_step(row, step, state):
     elif step == "evaluate":
         result = evaluate_investigation(UUID(row.id), EvidenceGraph.model_validate_json(row.graph_json), InvestigationReport.model_validate_json(row.report_json))
         row.eval_json = result.model_dump_json()
+
+
+def _ensure_sources(row, state):
+    """Snapshot the fixture once, independent of which collector runs first."""
+    if state.get("sources") is not None:
+        return
+    config = json.loads(row.config_json or "{}")
+    if "fetch_document" not in config.get("tools", []):
+        raise RuntimeError("Supply-chain profile does not allow fetch_document")
+    store = ObjectStore()
+    sources = []
+    for source in state["fixture"]["sources"]:
+        content = source["content"].encode()
+        key, digest = store.put(f"{row.id}/supply-chain/{source['id']}.txt", content)
+        sources.append(
+            SourceDocument(
+                id=source["id"],
+                url=source["url"],
+                publisher=source["publisher"],
+                document_type=source["document_type"],
+                published_at=source["published_at"],
+                fetched_at=now(),
+                sha256=digest,
+                object_key=key,
+                parser_version="1.0.0",
+                language=source["language"],
+            ).model_dump(mode="json")
+        )
+    projected_calls = state.get("tool_calls", 0) + len(sources)
+    limit = config.get("budgets", {}).get("max_tool_calls", 30)
+    if projected_calls > limit:
+        raise RuntimeError("investigation tool-call budget exceeded")
+    state["sources"] = sources
+    state["tool_calls"] = projected_calls
+    add_event(
+        row,
+        "tool.completed",
+        row.current_step,
+        f"Snapshotted {len(sources)} allowlisted source documents",
+        tool="fetch_document",
+        source_count=len(sources),
+    )
+
+
+async def enhance_report(row, state, session=None):
+    """Apply the published provider prompt while the harness owns evidence identity."""
+    config = json.loads(row.config_json or "{}")
+    provider = get_provider(run_config=config)
+    if not provider:
+        state["provider"], state["model"] = "deterministic", "template-v1"
+        if config.get("provider") == "openai":
+            add_event(row, "provider.fallback", row.current_step, "OPENAI_API_KEY is not configured; deterministic investigation synthesis was used")
+        return
+
+    draft = InvestigationReport.model_validate_json(row.report_json)
+    pending = ""
+
+    async def emit_summary(delta: str):
+        nonlocal pending
+        summaries = state.setdefault("reasoning_summaries", [])
+        if summaries and len(summaries[-1]) < 1200:
+            summaries[-1] += delta
+        else:
+            summaries.append(delta)
+        pending += delta
+        if len(pending) >= 120:
+            add_event(row, "reasoning.summary.delta", row.current_step, pending, provider="openai", model=config.get("model"))
+            pending = ""
+            row.state = state
+            if session:
+                await session.commit()
+
+    generated, usage = await provider.generate_structured(
+        f"{config.get('prompt', '').strip()}\n\nRefine the investigation narrative using only the supplied graph and source documents. Do not add companies, evidence paths, sources, or numerical claims.",
+        {"evidence_graph": json.loads(row.graph_json), "draft": draft.model_dump(mode="json")},
+        InvestigationReport,
+        emit_summary,
+    )
+    if pending:
+        add_event(row, "reasoning.summary.delta", row.current_step, pending, provider="openai", model=config.get("model"))
+
+    draft_candidates = {item.company_entity_id: item for item in [*draft.candidates, *draft.watchlist]}
+    generated_candidates = [*generated.candidates, *generated.watchlist]
+    if {item.company_entity_id for item in generated_candidates} != set(draft_candidates):
+        add_event(row, "guardrail.fallback", row.current_step, "Generated report changed evidence-bound company identities; deterministic draft retained")
+        generated = draft
+    else:
+        for item in generated_candidates:
+            authoritative = draft_candidates[item.company_entity_id]
+            item.evidence_path = authoritative.evidence_path
+            item.primary_source_count = authoritative.primary_source_count
+            item.qualified = authoritative.qualified
+        generated.investigation_id = draft.investigation_id
+        generated.language = draft.language
+        generated.graph_version = draft.graph_version
+        generated.source_documents = draft.source_documents
+        generated.rendered_markdown = draft.rendered_markdown
+        generated.disclaimer = draft.disclaimer
+
+    state["provider"], state["model"] = "openai", config.get("model")
+    state["input_tokens"], state["output_tokens"] = usage.input_tokens, usage.output_tokens
+    pricing = config.get("pricing", {})
+    state["estimated_cost_usd"] = round(
+        usage.input_tokens * float(pricing.get("input_per_million_usd", 0)) / 1_000_000
+        + usage.output_tokens * float(pricing.get("output_per_million_usd", 0)) / 1_000_000,
+        6,
+    )
+    if state["estimated_cost_usd"] > float(config.get("budgets", {}).get("max_cost_usd", 5)):
+        raise RuntimeError("investigation cost budget exceeded")
+    if not usage.reasoning_summaries:
+        add_event(row, "reasoning.summary.unavailable", row.current_step, "The selected model/provider did not return a reasoning summary")
+    row.report_json = generated.model_dump_json()
 
 
 def compose_report(row, state):

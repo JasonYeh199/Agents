@@ -19,6 +19,7 @@ dev = ["pytest>=8,<9", "pytest-asyncio>=0.24,<1", "ruff>=0.8,<1"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["network: opt-in tests that call official SEC/TWSE services"]
 
 [tool.ruff]
 line-length = 100

@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.profiles import default_profile, validate_profile
 from app.schemas import CreateInvestigation, EvidenceGraph, InvestigationReport
-from app.supply_chain import evaluate_investigation, load_fixture
+from app.supply_chain import evaluate_investigation, load_fixture, make_tasks
 
 
 def test_investigation_input_contract():
@@ -23,6 +24,21 @@ def test_fixture_edges_have_valid_direction_and_primary_evidence():
         assert edge["source_ids"]
         if edge["type"] == "benefits_from":
             assert edge["inference_level"] == "derived"
+
+
+def test_published_pipeline_controls_supply_chain_agent_order_and_enablement():
+    config = default_profile("supply-chain")
+    nodes = config["pipeline"]
+    demand = next(node for node in nodes if node["id"] == "demand")
+    demand["enabled"] = False
+    resolver = next(node for node in nodes if node["id"] == "entity_resolver")
+    resolver["depends_on"].remove("demand")
+    supplier = nodes.pop(next(index for index, node in enumerate(nodes) if node["id"] == "supplier"))
+    nodes.insert(1, supplier)
+    assert validate_profile("supply-chain", config) == []
+    roles = [task["agent_role"] for task in make_tasks(config)]
+    assert roles[:2] == ["supplier", "capacity"]
+    assert "demand" not in roles
 
 
 def test_supply_chain_api_end_to_end():

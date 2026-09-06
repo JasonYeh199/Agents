@@ -1,6 +1,6 @@
 "use client";
 import {useEffect,useState} from "react";
-const API=process.env.NEXT_PUBLIC_API_URL||"http://localhost:8000";
+const API=process.env.NEXT_PUBLIC_API_URL||(process.env.NODE_ENV==="production"?"":"http://localhost:8000");
 type Run={id:string;company:string;fiscal_period:string;status:string};
 type Ev={citation:{source_id:string;locator:string;supporting_excerpt:string}};
 type Turn={sequence:number;round:number;role:string;turn_type:string;argument:string;evidence:Ev[];confidence:number};

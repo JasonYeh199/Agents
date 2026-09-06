@@ -1,7 +1,16 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Keep a single repository-level .env usable regardless of whether uvicorn is
+# launched from the repository root or from apps/api (the documented workflow).
+WORKING_DIRECTORY_ENV = Path.cwd() / ".env"
+REPOSITORY_ENV = next(
+    (parent / ".env" for parent in Path(__file__).resolve().parents if (parent / ".env").is_file()),
+    WORKING_DIRECTORY_ENV,
+)
 
 
 class Settings(BaseSettings):
@@ -24,7 +33,32 @@ class Settings(BaseSettings):
     fetch_max_bytes: int = 15_000_000
     step_timeout_seconds: float = 45
     max_step_retries: int = 2
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    admin_token: str = ""
+    admin_session_secret: str = ""
+    admin_cookie_secure: bool = True
+    admin_session_hours: int = 8
+    sec_user_agent: str = ""
+    universe_auto_sync: bool = True
+    universe_sync_hour_utc: int = 18
+    fixture_mode: bool = False
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: object) -> object:
+        """Make Render's standard Postgres URL usable by SQLAlchemy asyncio."""
+        if not isinstance(value, str):
+            return value
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+asyncpg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
+    model_config = SettingsConfigDict(
+        env_file=(REPOSITORY_ENV, WORKING_DIRECTORY_ENV),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 @lru_cache

@@ -15,9 +15,11 @@ OFFICIAL_HOSTS = {
     "nvidianews.nvidia.com",
     "sec.gov",
     "www.sec.gov",
+    "data.sec.gov",
     "investor.tsmc.com",
     "mops.twse.com.tw",
     "www.twse.com.tw",
+    "openapi.twse.com.tw",
     "www.tsmc.com",
     "pr.tsmc.com",
     "news.skhynix.com",
@@ -53,11 +55,13 @@ def validate_official_url(url: str) -> str:
 async def fetch_document(url: str) -> tuple[bytes, str]:
     validate_official_url(url)
     settings = get_settings()
+    if (urlparse(url).hostname or "").lower() in {"sec.gov", "www.sec.gov", "data.sec.gov"} and not settings.sec_user_agent:
+        raise ToolError("sec_user_agent_required", "SEC_USER_AGENT must be configured for SEC requests")
     async with httpx.AsyncClient(
         timeout=settings.fetch_timeout_seconds, follow_redirects=False
     ) as client:
         response = await client.get(
-            url, headers={"User-Agent": "SignalForge-PoC/1.0 research@example.invalid"}
+            url, headers={"User-Agent": settings.sec_user_agent}
         )
         response.raise_for_status()
         mime = response.headers.get("content-type", "").split(";")[0].lower()

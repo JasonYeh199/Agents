@@ -3,12 +3,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
-
-
-class Company(StrEnum):
-    NVIDIA = "nvidia"
-    TSMC = "tsmc"
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 
 class Language(StrEnum):
@@ -26,18 +21,31 @@ class RunStatus(StrEnum):
 
 
 class RunConfig(BaseModel):
+    provider: Literal["deterministic", "openai"] | None = None
     model: str | None = None
     reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "medium"
+    reasoning_summary: Literal["auto", "concise", "detailed", "none"] = "auto"
     max_tool_calls: int = Field(20, ge=1, le=100)
     max_output_tokens: int = Field(6000, ge=500, le=50000)
-    live_sources: bool = False
+    live_sources: bool = True
 
 
 class CreateRun(BaseModel):
-    company: Company
+    ticker: str = Field(validation_alias=AliasChoices("ticker", "company"))
     fiscal_period: str = Field(pattern=r"^FY\d{4}-Q[1-4]$")
     output_language: Language = Language.ZH_TW
     config: RunConfig = Field(default_factory=RunConfig)
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_ticker(cls, value: str) -> str:
+        from .universe import normalize_ticker
+
+        return normalize_ticker(value)
+
+    @property
+    def company(self) -> str:
+        return self.ticker
 
 
 class SourceDocument(BaseModel):
@@ -95,7 +103,7 @@ class ReportSection(BaseModel):
 
 
 class EarningsReport(BaseModel):
-    company: Company
+    company: str
     fiscal_period: str
     language: Language
     executive_summary: str
@@ -107,6 +115,11 @@ class EarningsReport(BaseModel):
     disclaimer: str
     canonical_facts_hash: str
     rendered_markdown: str
+    ticker: str | None = None
+    company_name: str | None = None
+    market: str | None = None
+    universe_version_id: str | None = None
+    profile_version_id: str | None = None
 
 
 class RunEvent(BaseModel):
@@ -120,7 +133,7 @@ class RunEvent(BaseModel):
 
 class RunView(BaseModel):
     id: UUID
-    company: Company
+    company: str
     fiscal_period: str
     output_language: Language
     status: RunStatus
@@ -129,6 +142,11 @@ class RunView(BaseModel):
     error: str | None
     created_at: datetime
     updated_at: datetime
+    ticker: str | None = None
+    company_name: str | None = None
+    market: str | None = None
+    universe_version_id: str | None = None
+    profile_version_id: str | None = None
 
 
 class EvalMetric(BaseModel):
@@ -155,6 +173,10 @@ class TraceView(BaseModel):
     estimated_cost_usd: float
     tool_calls: int
     duration_ms: int
+    reasoning_summaries: list[dict[str, Any]] = Field(default_factory=list)
+    agents: list[dict[str, Any]] = Field(default_factory=list)
+    config_snapshot: dict[str, Any] = Field(default_factory=dict)
+    profile_version_id: str | None = None
 
 
 class ThesisEvidence(BaseModel):
@@ -175,7 +197,7 @@ class ThesisClaim(BaseModel):
 
 class ThesisSnapshot(BaseModel):
     version: int = Field(ge=1)
-    company: Company
+    company: str
     title: str
     core_thesis: str
     claims: list[ThesisClaim] = Field(min_length=1)
@@ -395,7 +417,7 @@ class DebateVerdict(BaseModel):
 class DebateView(BaseModel):
     id: UUID
     topic: str
-    company: Company
+    company: str
     language: Language
     status: RunStatus
     current_round: int
@@ -406,6 +428,11 @@ class DebateView(BaseModel):
     events: list[RunEvent]
     created_at: datetime
     updated_at: datetime
+    ticker: str | None = None
+    company_name: str | None = None
+    market: str | None = None
+    universe_version_id: str | None = None
+    profile_version_id: str | None = None
 
 
 class DebateTrace(BaseModel):
@@ -428,10 +455,21 @@ class AutonomousConfig(BaseModel):
 
 class CreateAutonomousProject(BaseModel):
     question: str = Field(min_length=10, max_length=2000)
-    company: Company
+    ticker: str = Field(validation_alias=AliasChoices("ticker", "company"))
     fiscal_period: str = Field(pattern=r"^FY\d{4}-Q[1-4]$")
     language: Language = Language.ZH_TW
     config: AutonomousConfig = Field(default_factory=AutonomousConfig)
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_ticker(cls, value: str) -> str:
+        from .universe import normalize_ticker
+
+        return normalize_ticker(value)
+
+    @property
+    def company(self) -> str:
+        return self.ticker
 
 
 class ProjectTask(BaseModel):
@@ -454,7 +492,7 @@ class ResearchFinding(BaseModel):
 class AutonomousReport(BaseModel):
     project_id: UUID
     question: str
-    company: Company
+    company: str
     language: Language
     executive_summary: str
     findings: list[ResearchFinding]
@@ -466,12 +504,17 @@ class AutonomousReport(BaseModel):
     source_run_id: UUID
     rendered_markdown: str
     disclaimer: str
+    ticker: str | None = None
+    company_name: str | None = None
+    market: str | None = None
+    universe_version_id: str | None = None
+    profile_version_id: str | None = None
 
 
 class AutonomousProjectView(BaseModel):
     id: UUID
     question: str
-    company: Company
+    company: str
     language: Language
     status: Literal["queued", "running", "paused", "awaiting_retry", "completed", "failed", "cancelled"]
     current_step: str | None
@@ -481,6 +524,11 @@ class AutonomousProjectView(BaseModel):
     budget: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    ticker: str | None = None
+    company_name: str | None = None
+    market: str | None = None
+    universe_version_id: str | None = None
+    profile_version_id: str | None = None
 
 
 class AutonomousTrace(BaseModel):
@@ -508,9 +556,20 @@ class HarnessVariant(BaseModel):
 
 class CreateArena(BaseModel):
     name: str = Field(min_length=3, max_length=240)
-    company: Company
+    ticker: str = Field(validation_alias=AliasChoices("ticker", "company"))
     fiscal_period: str = Field(pattern=r"^FY\d{4}-Q[1-4]$")
     variants: list[HarnessVariant] = Field(min_length=2, max_length=6)
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_ticker(cls, value: str) -> str:
+        from .universe import normalize_ticker
+
+        return normalize_ticker(value)
+
+    @property
+    def company(self) -> str:
+        return self.ticker
 
     @model_validator(mode="after")
     def unique_variants(self):
@@ -550,3 +609,8 @@ class ArenaView(BaseModel):
     events: list[RunEvent]
     created_at: datetime
     updated_at: datetime
+    ticker: str | None = None
+    company_name: str | None = None
+    market: str | None = None
+    universe_version_id: str | None = None
+    profile_version_id: str | None = None

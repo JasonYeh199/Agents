@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -213,6 +213,74 @@ class EvaluationArenaRow(Base):
 
     arena_results = _json_property("results_json", [])
     arena_events = _json_property("events_json", [])
+
+
+class UniverseSnapshotRow(Base):
+    __tablename__ = "universe_snapshots"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    universe: Mapped[str] = mapped_column(String(32), index=True)
+    version: Mapped[str] = mapped_column(String(64), index=True)
+    as_of_date: Mapped[str] = mapped_column(String(10))
+    source_url: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    members_json: Mapped[str] = mapped_column(Text)
+    active: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("universe", "version", name="uq_universe_version"),)
+
+    @property
+    def members(self):
+        return json.loads(self.members_json)
+
+
+class UniverseArtifactRow(Base):
+    __tablename__ = "universe_artifacts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(String(36), index=True)
+    source_url: Mapped[str] = mapped_column(Text)
+    object_key: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AgentProfileVersionRow(Base):
+    __tablename__ = "agent_profile_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    poc_type: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    config_json: Mapped[str] = mapped_column(Text)
+    validation_errors_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("poc_type", "version", name="uq_profile_poc_version"),)
+
+    @property
+    def config(self):
+        return json.loads(self.config_json)
+
+    @property
+    def validation_errors(self):
+        return json.loads(self.validation_errors_json)
+
+
+class AuditLogRow(Base):
+    __tablename__ = "admin_audit_log"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    actor: Mapped[str] = mapped_column(String(80), default="admin")
+    target_type: Mapped[str] = mapped_column(String(80))
+    target_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def detail(self):
+        return json.loads(self.detail_json)
 
 
 engine = create_async_engine(get_settings().database_url)
